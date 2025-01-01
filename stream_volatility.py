@@ -13,11 +13,6 @@ except ImportError:
     """)
 import matplotlib.font_manager as fm
 import plotly.graph_objects as go
-<<<<<<< HEAD:stream_voltrade.py
-=======
-
-st.set_page_config(layout="wide")
->>>>>>> f320896ef20d2c29441b3696b9b67cf08ddf35f4:stream_volatility.py
 
 # 패키지 존재 여부 확인 및 에러 처리
 def check_dependencies():
@@ -75,7 +70,6 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # Title
 st.title('주가 변동성 분석 시스템')
-<<<<<<< HEAD:stream_voltrade.py
 
 # 투자 의사결정 프로세스 설명 추가
 st.markdown("""
@@ -112,35 +106,22 @@ st.markdown("""
 ### 📈 분석 개요
 """)
 
-=======
->>>>>>> f320896ef20d2c29441b3696b9b67cf08ddf35f4:stream_volatility.py
 st.markdown("""
 ### 분석 개요
 이 시스템은 주식의 변동성과 리스크를 다각도로 분석합니다.
 
 #### 주요 지표:
-<<<<<<< HEAD:stream_voltrade.py
 1. **베이지안 변동성 분석**
    - 시장 대비 변동성 측정
    - 상관관계 분석
    
-=======
-1. **베타 계수 분석**
-   - 시장 대비 변동성 측정
-   - 상관관계 분석
-
->>>>>>> f320896ef20d2c29441b3696b9b67cf08ddf35f4:stream_volatility.py
 2. **변동성 지표**
    - 역사적 변동성 계산
    - 내재 변동성 추정
 
 3. **리스크 평가**
    - VaR (Value at Risk) 계산
-<<<<<<< HEAD:stream_voltrade.py
    - MDD(Maximum Drawdown) 제공
-=======
-   - 최대 손실 예상치 제공
->>>>>>> f320896ef20d2c29441b3696b9b67cf08ddf35f4:stream_volatility.py
 """)
 
 # Sidebar Inputs
