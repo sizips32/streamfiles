@@ -20,3 +20,5 @@ scikit-learn==1.3.2
 pydantic==2.5.2
 konlpy
 JPype1
+wordcloud
+
