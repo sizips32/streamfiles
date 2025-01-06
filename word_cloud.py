@@ -116,7 +116,7 @@ if __name__ == '__main__':
             try:
                 # 폰트 경로 설정
                 font_paths = [
-                    './font/NanumGothic.ttf',
+                    '/font/NanumGothic.ttf',
                     '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
                     '/System/Library/Fonts/AppleGothic.ttf',
                     'C:/Windows/Fonts/malgun.ttf',
@@ -147,6 +147,18 @@ if __name__ == '__main__':
                 plt.imshow(wordcloud, interpolation='bilinear')
                 plt.axis('off')
                 st.pyplot(plt)
+
+                # 단어 빈도 계산
+                words = text.split()
+                word_counts = Counter(words)
+                
+                # 상위 10개 단어 추출
+                top_10_words = word_counts.most_common(10)
+                
+                # 상위 10개 단어 출력
+                st.write("상위 10개 단어별 언급 횟수:")
+                for word, count in top_10_words:
+                    st.write(f"{word}: {count}")
 
             except Exception as e:
                 st.error(f"워드 클라우드 생성 중 오류가 발생했습니다: {str(e)}")
