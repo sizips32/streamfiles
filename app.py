@@ -9,6 +9,7 @@ import logging
 import psutil  # 추가된 모듈
 import PyPDF2  # PyPDF2 임포트 추가
 import markdown  # markdown 임포트 추가
+from flask_cors import CORS  # 추가할 코드
 from analysis import (
     perform_dividend_analysis,
     perform_portfolio_optimization,
@@ -23,8 +24,14 @@ app = Flask(__name__,
             static_folder='static',
             template_folder='templates')
 
-from flask_cors import CORS  # 추가할 코드
-CORS(app)  # CORS 설정 활성화
+# CORS 설정 - 허용할 도메인과 메서드를 명시적으로 지정
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5000", "https://your-production-domain.com"],
+        "methods": ["GET", "POST", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # 로깅 설정
 if __name__ != '__main__':
