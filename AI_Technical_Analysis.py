@@ -160,10 +160,23 @@ st.markdown("""
    - 산업 평균과 비교하여 적정가치 판단
 """)
 
+class AnalysisError(Exception):
+    """분석 과정에서 발생하는 사용자 정의 예외"""
+    pass
+
+def handle_error(error, context=""):
+    """에러 처리 통합 함수"""
+    if isinstance(error, AnalysisError):
+        st.error(f"분석 오류: {str(error)}")
+    elif isinstance(error, ValueError):
+        st.error(f"입력값 오류: {str(error)}")
+    else:
+        st.error(f"{context} 중 오류 발생: {str(error)}")
+    return None
+
 def fetch_stock_data(symbol, period):
     """주식 데이터를 가져오는 함수"""
     try:
-        # yfinance를 사용하여 주식 데이터 가져오기
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period)
         
@@ -171,10 +184,19 @@ def fetch_stock_data(symbol, period):
             st.error(f"{symbol}에 대한 데이터를 찾을 수 없습니다.")
             return None
             
-        # 거래량이 0인 행 제거
+        # 거래량이 0인 행 제거 전에 데이터 존재 여부 확인
+        if 'Volume' not in data.columns:
+            st.error("거래량 데이터가 존재하지 않습니다.")
+            return None
+            
         data = data[data['Volume'] > 0]
         
-        # VWAP 계산
+        # VWAP 계산 전에 필요한 컬럼 존재 여부 확인
+        required_columns = ['High', 'Low', 'Close', 'Volume']
+        if not all(col in data.columns for col in required_columns):
+            st.error("필요한 가격 데이터가 누락되었습니다.")
+            return None
+            
         data['VWAP'] = (data['High'] + data['Low'] + data['Close']) / 3
         data['VWAP'] = (data['VWAP'] * data['Volume']).cumsum() / data['Volume'].cumsum()
         
@@ -184,7 +206,139 @@ def fetch_stock_data(symbol, period):
         st.error(f"데이터 가져오기 실패: {str(e)}")
         return None
 
+def calculate_technical_indicators(data, indicator):
+    """기술적 지표 계산 함수 최적화"""
+    if not isinstance(data, pd.DataFrame) or data.empty:
+        return None
+        
+    # 계산 결과를 캐시하기 위한 딕셔너리
+    if not hasattr(calculate_technical_indicators, 'cache'):
+        calculate_technical_indicators.cache = {}
+    
+    # 캐시 키 생성
+    cache_key = f"{indicator}_{data.index[-1]}"
+    
+    # 캐시된 결과가 있으면 반환
+    if cache_key in calculate_technical_indicators.cache:
+        return calculate_technical_indicators.cache[cache_key]
+    
+    result = None
+    
+    try:
+        if indicator == "20-Day SMA":
+            result = data['Close'].rolling(window=20).mean()
+        elif indicator == "60-Day SMA":
+            result = data['Close'].rolling(window=60).mean()
+        elif indicator == "20-Day Bollinger Bands":
+            sma = data['Close'].rolling(window=20).mean()
+            std = data['Close'].rolling(window=20).std()
+            result = sma, sma + 2 * std, sma - 2 * std
+        elif indicator == "VWAP":
+            result = (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
+        elif indicator == "MACD":
+            exp1 = data['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = data['Close'].ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=9, adjust=False).mean()
+            result = macd, signal
+        elif indicator == "RSI":
+            delta = data['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            result = 100 - (100 / (1 + rs))
+        elif indicator == "Squeeze Momentum":
+            # 볼린저 밴드 계산 (20일, 2표준편차)
+            bb_mean = data['Close'].rolling(window=20).mean()
+            bb_std = data['Close'].rolling(window=20).std()
+            bb_upper = bb_mean + (2 * bb_std)
+            bb_lower = bb_mean - (2 * bb_std)
+
+            # 켈트너 채널 계산 (20일, 1.5배 ATR)
+            tr = pd.DataFrame()
+            tr['h-l'] = data['High'] - data['Low']
+            tr['h-pc'] = abs(data['High'] - data['Close'].shift())
+            tr['l-pc'] = abs(data['Low'] - data['Close'].shift())
+            tr['tr'] = tr[['h-l', 'h-pc', 'l-pc']].max(axis=1)
+            atr = tr['tr'].rolling(window=20).mean()
+
+            kc_mean = data['Close'].rolling(window=20).mean()
+            kc_upper = kc_mean + (1.5 * atr)
+            kc_lower = kc_mean - (1.5 * atr)
+
+            # 스퀴즈 상태 확인 (1: 스퀴즈 ON, 0: 스퀴즈 OFF)
+            squeeze = ((bb_upper < kc_upper) & (bb_lower > kc_lower)).astype(int)
+
+            # 모멘텀 계산
+            highest = data['High'].rolling(window=20).max()
+            lowest = data['Low'].rolling(window=20).min()
+            mm = data['Close'] - (highest + lowest) / 2
+            momentum = mm.rolling(window=20).mean()
+
+            result = squeeze, momentum
+        elif indicator == "MFI":
+            # Typical Price
+            typical_price = (data['High'] + data['Low'] + data['Close']) / 3
+            # Raw Money Flow
+            raw_money_flow = typical_price * data['Volume']
+            
+            # Money Flow Direction
+            money_flow_direction = np.where(typical_price > typical_price.shift(1), 1, -1)
+            
+            # Positive and Negative Money Flow
+            positive_flow = pd.Series(np.where(money_flow_direction > 0, raw_money_flow, 0))
+            negative_flow = pd.Series(np.where(money_flow_direction < 0, raw_money_flow, 0))
+            
+            # 14-period Money Flow Ratio
+            positive_mf = positive_flow.rolling(window=14).sum()
+            negative_mf = negative_flow.rolling(window=14).sum()
+            
+            # Money Flow Index
+            money_flow_ratio = positive_mf / negative_mf
+            result = 100 - (100 / (1 + money_flow_ratio))
+        
+        # 결과 캐시 저장
+        calculate_technical_indicators.cache[cache_key] = result
+        return result
+        
+    except Exception as e:
+        st.error(f"지표 계산 중 오류 발생: {str(e)}")
+        return None
+
+class TechnicalAnalysis:
+    def __init__(self):
+        self.cache = {}
+        
+    def calculate_indicators(self, data, indicators):
+        results = {}
+        for indicator in indicators:
+            results[indicator] = self.calculate_single_indicator(data, indicator)
+        return results
+        
+    def calculate_single_indicator(self, data, indicator):
+        # 기존의 calculate_technical_indicators 함수 로직
+        pass
+        
+    def analyze_signals(self, data, symbol):
+        # 기존의 calculate_signal_probabilities 함수 로직
+        pass
+
+# 메인 코드에서 사용
+technical_analyzer = TechnicalAnalysis()
+
 def main():
+    # 세션 상태 초기화
+    if 'stock_data' not in st.session_state:
+        st.session_state['stock_data'] = None
+    if 'last_symbol' not in st.session_state:
+        st.session_state['last_symbol'] = None
+    
+    # 캐시 크기 제한
+    MAX_CACHE_SIZE = 1000
+    if hasattr(calculate_technical_indicators, 'cache'):
+        if len(calculate_technical_indicators.cache) > MAX_CACHE_SIZE:
+            calculate_technical_indicators.cache.clear()
+    
     st.title("AI Technical Analysis")
     
     # 사이드바 구성
@@ -223,7 +377,7 @@ def main():
             "Squeeze Momentum",
             "MFI"
         ],
-        default=["20-Day SMA", "MACD", "RSI"]
+        default=["20-Day SMA", "60-Day SMA", "20-Day Bollinger Bands", "VWAP"]
     )
 
     # Check if data is available
@@ -241,82 +395,6 @@ def main():
                 name="Candlestick"
             )
         ])
-
-        # Helper function to calculate technical indicators
-        def calculate_technical_indicators(data, indicator):
-            if indicator == "20-Day SMA":
-                return data['Close'].rolling(window=20).mean()
-            elif indicator == "60-Day SMA":
-                return data['Close'].rolling(window=60).mean()
-            elif indicator == "20-Day Bollinger Bands":
-                sma = data['Close'].rolling(window=20).mean()
-                std = data['Close'].rolling(window=20).std()
-                return sma, sma + 2 * std, sma - 2 * std
-            elif indicator == "VWAP":
-                return (data['Close'] * data['Volume']).cumsum() / data['Volume'].cumsum()
-            elif indicator == "MACD":
-                exp1 = data['Close'].ewm(span=12, adjust=False).mean()
-                exp2 = data['Close'].ewm(span=26, adjust=False).mean()
-                macd = exp1 - exp2
-                signal = macd.ewm(span=9, adjust=False).mean()
-                return macd, signal
-            elif indicator == "RSI":
-                delta = data['Close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
-                return 100 - (100 / (1 + rs))
-            elif indicator == "Squeeze Momentum":
-                # 볼린저 밴드 계산 (20일, 2표준편차)
-                bb_mean = data['Close'].rolling(window=20).mean()
-                bb_std = data['Close'].rolling(window=20).std()
-                bb_upper = bb_mean + (2 * bb_std)
-                bb_lower = bb_mean - (2 * bb_std)
-
-                # 켈트너 채널 계산 (20일, 1.5배 ATR)
-                tr = pd.DataFrame()
-                tr['h-l'] = data['High'] - data['Low']
-                tr['h-pc'] = abs(data['High'] - data['Close'].shift())
-                tr['l-pc'] = abs(data['Low'] - data['Close'].shift())
-                tr['tr'] = tr[['h-l', 'h-pc', 'l-pc']].max(axis=1)
-                atr = tr['tr'].rolling(window=20).mean()
-
-                kc_mean = data['Close'].rolling(window=20).mean()
-                kc_upper = kc_mean + (1.5 * atr)
-                kc_lower = kc_mean - (1.5 * atr)
-
-                # 스퀴즈 상태 확인 (1: 스퀴즈 ON, 0: 스퀴즈 OFF)
-                squeeze = ((bb_upper < kc_upper) & (bb_lower > kc_lower)).astype(int)
-
-                # 모멘텀 계산
-                highest = data['High'].rolling(window=20).max()
-                lowest = data['Low'].rolling(window=20).min()
-                mm = data['Close'] - (highest + lowest) / 2
-                momentum = mm.rolling(window=20).mean()
-
-                return squeeze, momentum
-            elif indicator == "MFI":
-                # Typical Price
-                typical_price = (data['High'] + data['Low'] + data['Close']) / 3
-                # Raw Money Flow
-                raw_money_flow = typical_price * data['Volume']
-                
-                # Money Flow Direction
-                money_flow_direction = np.where(typical_price > typical_price.shift(1), 1, -1)
-                
-                # Positive and Negative Money Flow
-                positive_flow = pd.Series(np.where(money_flow_direction > 0, raw_money_flow, 0))
-                negative_flow = pd.Series(np.where(money_flow_direction < 0, raw_money_flow, 0))
-                
-                # 14-period Money Flow Ratio
-                positive_mf = positive_flow.rolling(window=14).sum()
-                negative_mf = negative_flow.rolling(window=14).sum()
-                
-                # Money Flow Index
-                money_flow_ratio = positive_mf / negative_mf
-                mfi = 100 - (100 / (1 + money_flow_ratio))
-                
-                return mfi
 
         # Helper function to add indicators to the chart
         def add_indicator(indicator):
@@ -445,7 +523,7 @@ def main():
                         yaxis=dict(domain=[0.7, 1]),
                         yaxis2=dict(domain=[0.5, 0.65], title="MACD"),
                         yaxis3=dict(domain=[0.25, 0.45], title="RSI"),
-                        yaxis5=dict(domain=[0, 0.2], title="MFI")
+                        yaxis5=dict(domain=[0.1, 0.3], title="MFI")
                     )
                 elif "MACD" in indicators or "RSI" in indicators:
                     # MFI와 다른 하나의 지표가 있는 경우
@@ -826,41 +904,47 @@ def main():
                     else:
                         st.warning("고평가 구간")
 
-        # 재무 정보 가져오기 버튼 (필요한 경우)
-        if st.sidebar.button("Get Financial Info", key="financial_info_button"):
-            try:
-                # ... financial info code ...
-                pass
-            except Exception as e:
-                st.error(f"재무 정보 로딩 중 오류 발생: {str(e)}")
+        # 가치 평가 지표 설명
+        VALUATION_METRICS_DOC = """
+        가치 평가 지표는 기업의 주식이 현재 가격에 비해 과대평가 또는 과소평가되어 있는지를 판단하는 데 도움을 줍니다. 다음은 주요 가치 평가 지표와 그 의미입니다.
 
-    # 가치 평가 지표 설명
-    VALUATION_METRICS_DOC = """
-    가치 평가 지표는 기업의 주식이 현재 가격에 비해 과대평가 또는 과소평가되어 있는지를 판단하는 데 도움을 줍니다. 다음은 주요 가치 평가 지표와 그 의미입니다.
+        1. 주가수익비율 (Price-to-Earnings Ratio, P/E Ratio)
+        의미: 주가를 주당 순이익(EPS)으로 나눈 값으로, 주식이 현재 수익에 비해 얼마나 비싼지를 나타냅니다.
 
-    1. 주가수익비율 (Price-to-Earnings Ratio, P/E Ratio)
-    의미: 주가를 주당 순이익(EPS)으로 나눈 값으로, 주식이 현재 수익에 비해 얼마나 비싼지를 나타냅니다.
+        2. 주가순자산비율 (Price-to-Book Ratio, P/B Ratio)
+        의미: 주가를 주당 순자산(BVPS)으로 나눈 값으로, 기업의 자산 가치에 비해 주가가 얼마나 비싼지를 나타냅니다.
 
-    2. 주가순자산비율 (Price-to-Book Ratio, P/B Ratio)
-    의미: 주가를 주당 순자산(BVPS)으로 나눈 값으로, 기업의 자산 가치에 비해 주가가 얼마나 비싼지를 나타냅니다.
+        3. 주가매출비율 (Price-to-Sales Ratio, P/S Ratio)
+        의미: 주가를 주당 매출(SPS)로 나눈 값으로, 기업의 매출에 비해 주가가 얼마나 비싼지를 나타냅니다.
 
-    3. 주가매출비율 (Price-to-Sales Ratio, P/S Ratio)
-    의미: 주가를 주당 매출(SPS)로 나눈 값으로, 기업의 매출에 비해 주가가 얼마나 비싼지를 나타냅니다.
+        4. 배당 할인 모델 (Dividend Discount Model, DDM)
+        의미: 미래의 배당금을 현재 가치로 할인하여 주식의 가치를 평가하는 방법입니다.
 
-    4. 배당 할인 모델 (Dividend Discount Model, DDM)
-    의미: 미래의 배당금을 현재 가치로 할인하여 주식의 가치를 평가하는 방법입니다.
+        5. 자기자본이익률 (Return on Equity, ROE)
+        의미: 순이익을 자기자본으로 나눈 비율로, 기업이 자기자본을 얼마나 효율적으로 활용하고 있는지를 나타냅니다.
 
-    5. 자기자본이익률 (Return on Equity, ROE)
-    의미: 순이익을 자기자본으로 나눈 비율로, 기업이 자기자본을 얼마나 효율적으로 활용하고 있는지를 나타냅니다.
+        6. 부채비율 (Debt-to-Equity Ratio, D/E Ratio)
+        의미: 총 부채를 자기자본으로 나눈 비율로, 기업의 재무 레버리지 정도를 나타냅니다.
+        """
+        st.markdown(VALUATION_METRICS_DOC)
 
-    6. 부채비율 (Debt-to-Equity Ratio, D/E Ratio)
-    의미: 총 부채를 자기자본으로 나눈 비율로, 기업의 재무 레버리지 정도를 나타냅니다.
-    """
-    st.markdown(VALUATION_METRICS_DOC)
+        # Footer
+        st.sidebar.markdown("---")
+        st.sidebar.text("Created by Sean J. Kim")
 
-    # Footer
-    st.sidebar.markdown("---")
-    st.sidebar.text("Created by Sean J. Kim")
+    # 임시 파일 정리
+    def cleanup_temp_files():
+        temp_dir = tempfile.gettempdir()
+        for file in os.listdir(temp_dir):
+            if file.endswith('.png'):
+                try:
+                    os.remove(os.path.join(temp_dir, file))
+                except:
+                    pass
+    
+    # 앱 종료 시 정리
+    import atexit
+    atexit.register(cleanup_temp_files)
 
 if __name__ == "__main__":
     main()
