@@ -326,138 +326,85 @@ class TechnicalAnalysis:
 # 메인 코드에서 사용
 technical_analyzer = TechnicalAnalysis()
 
+def get_financial_metrics(ticker):
+    """기업 재무 지표 수집 함수"""
+    try:
+        info = ticker.info
+        financials = ticker.financials
+        balance_sheet = ticker.balance_sheet
+        
+        # 최신 재무제표 날짜 확인
+        latest_financial_date = financials.columns[0].strftime('%Y-%m-%d') if not financials.empty else '날짜 없음'
+        latest_balance_date = balance_sheet.columns[0].strftime('%Y-%m-%d') if not balance_sheet.empty else '날짜 없음'
+        
+        metrics = {
+            'sector': info.get('sector', 'N/A'),  # 업종
+            'industry': info.get('industry', 'N/A'),  # 세부 업종
+            'marketCap': info.get('marketCap', None),  # 시가총액
+            'priceToSalesTrailing12Months': info.get('priceToSalesTrailing12Months', None),  # PSR
+            'dividendYield': info.get('dividendYield', None),  # 배당수익률
+            'totalDebt': balance_sheet.loc['Total Debt'].iloc[0] if 'Total Debt' in balance_sheet.index else None,
+            'totalAssets': balance_sheet.loc['Total Assets'].iloc[0] if 'Total Assets' in balance_sheet.index else None,
+            'currentAssets': balance_sheet.loc['Total Current Assets'].iloc[0] if 'Total Current Assets' in balance_sheet.index else None,
+            'currentLiabilities': balance_sheet.loc['Total Current Liabilities'].iloc[0] if 'Total Current Liabilities' in balance_sheet.index else None,
+            'dates': {
+                'financial': latest_financial_date,
+                'balance': latest_balance_date
+            }
+        }
+        
+        # 부채비율 계산
+        if metrics['totalDebt'] is not None and metrics['totalAssets'] is not None:
+            metrics['debtRatio'] = (metrics['totalDebt'] / metrics['totalAssets']) * 100
+        else:
+            metrics['debtRatio'] = None
+            
+        # 유동비율 계산
+        if metrics['currentAssets'] is not None and metrics['currentLiabilities'] is not None:
+            metrics['currentRatio'] = (metrics['currentAssets'] / metrics['currentLiabilities']) * 100
+        else:
+            metrics['currentRatio'] = None
+            
+        return metrics
+    except Exception as e:
+        st.warning(f"재무 지표 수집 중 오류 발생: {str(e)}")
+        return None
+
 def format_number(number):
-    """숫자를 읽기 쉬운 형식으로 변환"""
+    """숫자 포맷팅 함수"""
     if number is None:
         return "N/A"
-    elif isinstance(number, (int, float)):
-        if number >= 1_000_000_000_000:  # 1조 이상
-            return f"{number/1_000_000_000_000:.2f}조"
-        elif number >= 100_000_000:  # 1억 이상
-            return f"{number/100_000_000:.2f}억"
-        elif number >= 10000:  # 1만 이상
-            return f"{number/10000:.2f}만"
-        else:
-            return f"{number:,.2f}"
-    return str(number)
-
-def display_financial_metrics(symbol):
-    """재무지표 상세 정보를 사이드바에 표시"""
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        
-        # 현재 시간 (한국 시간)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 📊 재무지표")
-        st.sidebar.markdown(f"*업데이트: {now}*")
-        
-        # 기본 정보
-        st.sidebar.markdown("#### 기본 정보")
-        metrics = {
-            "시가총액": format_number(info.get('marketCap')),
-            "52주 최고": format_number(info.get('fiftyTwoWeekHigh')),
-            "52주 최저": format_number(info.get('fiftyTwoWeekLow')),
-            "거래량": format_number(info.get('volume')),
-            "평균 거래량(10일)": format_number(info.get('averageVolume10days'))
-        }
-        
-        for key, value in metrics.items():
-            st.sidebar.text(f"{key}: {value}")
-        
-        # 밸류에이션 지표
-        st.sidebar.markdown("#### 밸류에이션 지표")
-        valuation_metrics = {
-            "PER (TTM)": f"{info.get('trailingPE', 'N/A')}",
-            "Forward PER": f"{info.get('forwardPE', 'N/A')}",
-            "PBR": f"{info.get('priceToBook', 'N/A')}",
-            "PSR": f"{info.get('priceToSalesTrailing12Months', 'N/A')}",
-            "EV/EBITDA": f"{info.get('enterpriseToEbitda', 'N/A')}"
-        }
-        
-        for key, value in valuation_metrics.items():
-            try:
-                value = float(value)
-                st.sidebar.text(f"{key}: {value:.2f}")
-            except (ValueError, TypeError):
-                st.sidebar.text(f"{key}: {value}")
-        
-        # 수익성 지표
-        st.sidebar.markdown("#### 수익성 지표")
-        profitability_metrics = {
-            "영업이익률": f"{info.get('operatingMargins', 'N/A')}",
-            "순이익률": f"{info.get('profitMargins', 'N/A')}",
-            "ROE": f"{info.get('returnOnEquity', 'N/A')}",
-            "ROA": f"{info.get('returnOnAssets', 'N/A')}"
-        }
-        
-        for key, value in profitability_metrics.items():
-            try:
-                value = float(value)
-                st.sidebar.text(f"{key}: {value:.2%}")
-            except (ValueError, TypeError):
-                st.sidebar.text(f"{key}: {value}")
-        
-        # 재무 안정성 지표
-        st.sidebar.markdown("#### 재무 안정성 지표")
-        stability_metrics = {
-            "부채비율": f"{info.get('debtToEquity', 'N/A')}",
-            "유동비율": f"{info.get('currentRatio', 'N/A')}",
-            "당좌비율": f"{info.get('quickRatio', 'N/A')}"
-        }
-        
-        for key, value in stability_metrics.items():
-            try:
-                value = float(value)
-                st.sidebar.text(f"{key}: {value:.2f}")
-            except (ValueError, TypeError):
-                st.sidebar.text(f"{key}: {value}")
-        
-        # 배당 정보
-        st.sidebar.markdown("#### 배당 정보")
-        dividend_metrics = {
-            "배당수익률": f"{info.get('dividendYield', 'N/A')}",
-            "배당성향": f"{info.get('payoutRatio', 'N/A')}",
-            "5년 평균 배당수익률": f"{info.get('fiveYearAvgDividendYield', 'N/A')}"
-        }
-        
-        for key, value in dividend_metrics.items():
-            try:
-                value = float(value)
-                st.sidebar.text(f"{key}: {value:.2%}")
-            except (ValueError, TypeError):
-                st.sidebar.text(f"{key}: N/A")
-        
-        # 성장성 지표
-        st.sidebar.markdown("#### 성장성 지표")
-        growth_metrics = {
-            "매출액 성장률": f"{info.get('revenueGrowth', 'N/A')}",
-            "순이익 성장률": f"{info.get('earningsGrowth', 'N/A')}",
-            "EPS 성장률": f"{info.get('earningsQuarterlyGrowth', 'N/A')}"
-        }
-        
-        for key, value in growth_metrics.items():
-            try:
-                value = float(value)
-                st.sidebar.text(f"{key}: {value:.2%}")
-            except (ValueError, TypeError):
-                st.sidebar.text(f"{key}: {value}")
-
-        # Footer (재무지표 상세 섹션 삭제)
-        st.sidebar.markdown("---")
-        st.sidebar.text("Created by Sean J. Kim")
-
-    except Exception as e:
-        st.sidebar.error(f"재무지표 로딩 중 오류 발생: {str(e)}")
+    if number >= 1_000_000_000_000:
+        return f"{number/1_000_000_000_000:.2f}조"
+    elif number >= 100_000_000:
+        return f"{number/100_000_000:.2f}억"
+    elif number >= 10000:
+        return f"{number/10000:.2f}만"
+    return f"{number:.2f}"
 
 def main():
-    # 세션 상태 초기화
+    # 세션 상태 초기화 및 메모리 관리
     if 'stock_data' not in st.session_state:
         st.session_state['stock_data'] = None
     if 'last_symbol' not in st.session_state:
         st.session_state['last_symbol'] = None
+    
+    # 캐시 크기 제한
+    MAX_CACHE_SIZE = 1000
+    if hasattr(calculate_technical_indicators, 'cache'):
+        if len(calculate_technical_indicators.cache) > MAX_CACHE_SIZE:
+            calculate_technical_indicators.cache.clear()
+    
+    # 임시 파일 자동 정리
+    @st.cache(allow_output_mutation=True)
+    def cleanup_temp_files():
+        temp_dir = tempfile.gettempdir()
+        for file in os.listdir(temp_dir):
+            if file.endswith('.png'):
+                try:
+                    os.remove(os.path.join(temp_dir, file))
+                except Exception:
+                    pass
     
     st.title("AI Technical Analysis")
     
@@ -466,9 +413,6 @@ def main():
     
     # 티커 심볼 입력
     symbol = st.sidebar.text_input("Enter Stock Symbol (e.g., AAPL):", "AAPL")
-    
-    # 재무지표 표시 호출
-    display_financial_metrics(symbol)
     
     # 기간 선택
     period = st.sidebar.selectbox(
@@ -484,35 +428,18 @@ def main():
                 st.session_state['stock_data'] = data
                 st.success(f"{symbol} 데이터를 성공적으로 불러왔습니다.")
             else:
-                st.error("데이터를 불러오지 못했습니다. 심볼을 확인해주세요.")
+                st.error("데이터를 가져오는데 실패했습니다.")
                 return
         except Exception as e:
             st.error(f"데이터 로딩 중 오류 발생: {str(e)}")
             return
-    
-    # Technical Indicators 선택
-    st.sidebar.subheader("Technical Indicators")
-    indicators = st.sidebar.multiselect(
-        "Select Indicators",
-        [
-            "20-Day SMA",
-            "60-Day SMA",
-            "20-Day Bollinger Bands",
-            "VWAP",
-            "MACD",
-            "RSI",
-            "Squeeze Momentum",
-            "MFI"
-        ],
-        default=["20-Day SMA", "60-Day SMA", "20-Day Bollinger Bands", "VWAP"]
-    )
 
-    # Check if data is available and valid
+    # Check if data is available
     if "stock_data" in st.session_state and st.session_state["stock_data"] is not None:
         data = st.session_state["stock_data"]
-        
+
+        # Plot candlestick chart
         try:
-            # Plot candlestick chart
             fig = go.Figure(data=[
                 go.Candlestick(
                     x=data.index,
@@ -608,6 +535,22 @@ def main():
                                  opacity=0.5, yref="y5")
 
             # Add selected indicators to the chart
+            st.sidebar.subheader("Technical Indicators")
+            indicators = st.sidebar.multiselect(
+                "Select Indicators",
+                [
+                    "20-Day SMA",
+                    "60-Day SMA",
+                    "20-Day Bollinger Bands",
+                    "VWAP",
+                    "MACD",
+                    "RSI",
+                    "Squeeze Momentum",
+                    "MFI"
+                ],
+                default=["20-Day SMA", "60-Day SMA", "20-Day Bollinger Bands", "VWAP"]
+            )
+
             for indicator in indicators:
                 add_indicator(indicator)
 
@@ -1032,29 +975,102 @@ def main():
                         else:
                             st.warning("고평가 구간")
 
-            # 가치 평가 지표 설명
-            VALUATION_METRICS_DOC = """
-            가치 평가 지표는 기업의 주식이 현재 가격에 비해 과대평가 또는 과소평가되어 있는지를 판단하는 데 도움을 줍니다. 다음은 주요 가치 평가 지표와 그 의미입니다.
-
-            1. 주가수익비율 (Price-to-Earnings Ratio, P/E Ratio)
-            의미: 주가를 주당 순이익(EPS)으로 나눈 값으로, 주식이 현재 수익에 비해 얼마나 비싼지를 나타냅니다.
-
-            2. 주가순자산비율 (Price-to-Book Ratio, P/B Ratio)
-            의미: 주가를 주당 순자산(BVPS)으로 나눈 값으로, 기업의 자산 가치에 비해 주가가 얼마나 비싼지를 나타냅니다.
-
-            3. 주가매출비율 (Price-to-Sales Ratio, P/S Ratio)
-            의미: 주가를 주당 매출(SPS)로 나눈 값으로, 기업의 매출에 비해 주가가 얼마나 비싼지를 나타냅니다.
-
-            4. 배당 할인 모델 (Dividend Discount Model, DDM)
-            의미: 미래의 배당금을 현재 가치로 할인하여 주식의 가치를 평가하는 방법입니다.
-
-            5. 자기자본이익률 (Return on Equity, ROE)
-            의미: 순이익을 자기자본으로 나눈 비율로, 기업이 자기자본을 얼마나 효율적으로 활용하고 있는지를 나타냅니다.
-
-            6. 부채비율 (Debt-to-Equity Ratio, D/E Ratio)
-            의미: 총 부채를 자기자본으로 나눈 비율로, 기업의 재무 레버리지 정도를 나타냅니다.
-            """
-            st.markdown(VALUATION_METRICS_DOC)
+                # 기업 정보 및 재무 지표 표시
+                st.subheader("🏢 기업 정보 및 재무 지표")
+                
+                # 기업 기본 정보
+                metrics = get_financial_metrics(yf.Ticker(symbol))
+                if metrics:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📊 기업 기본 정보")
+                        st.markdown(f"""
+                        - 🏭 업종: {metrics['sector']}
+                        - 🔍 세부업종: {metrics['industry']}
+                        - 💰 시가총액: {format_number(metrics['marketCap'])}
+                        """)
+                    
+                    with col2:
+                        st.markdown("#### 📅 재무제표 기준일")
+                        st.markdown(f"""
+                        - 📊 재무상태표: {metrics['dates']['balance']}
+                        - 💵 손익계산서: {metrics['dates']['financial']}
+                        """)
+                
+                # 재무 비율 표시
+                st.markdown("#### 📈 주요 재무 비율")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    if metrics['priceToSalesTrailing12Months'] is not None:
+                        psr = metrics['priceToSalesTrailing12Months']
+                        st.metric("💹 PSR", f"{psr:.2f}")
+                        if psr < 1:
+                            st.success("매우 저평가")
+                        elif psr < 3:
+                            st.info("적정 수준")
+                        else:
+                            st.warning("고평가")
+                
+                with col2:
+                    if metrics['dividendYield'] is not None:
+                        div_yield = metrics['dividendYield'] * 100
+                        st.metric("💰 배당수익률", f"{div_yield:.2f}%")
+                        if div_yield > 5:
+                            st.success("높은 배당")
+                        elif div_yield > 2:
+                            st.info("적정 배당")
+                        else:
+                            st.warning("낮은 배당")
+                
+                with col3:
+                    if metrics['debtRatio'] is not None:
+                        debt_ratio = metrics['debtRatio']
+                        st.metric("🏦 부채비율", f"{debt_ratio:.2f}%")
+                        if debt_ratio < 100:
+                            st.success("안정적")
+                        elif debt_ratio < 200:
+                            st.info("보통")
+                        else:
+                            st.warning("위험")
+                
+                with col4:
+                    if metrics['currentRatio'] is not None:
+                        current_ratio = metrics['currentRatio']
+                        st.metric("💵 유동비율", f"{current_ratio:.2f}%")
+                        if current_ratio > 200:
+                            st.success("매우 안정적")
+                        elif current_ratio > 100:
+                            st.info("안정적")
+                        else:
+                            st.warning("주의 필요")
+                
+                # 재무 비율 설명
+                with st.expander("📚 재무 비율 설명"):
+                    st.markdown("""
+                    ### 📊 주요 재무 비율 해석 가이드
+                    
+                    #### 💹 PSR (주가매출액비율)
+                    - 1 미만: 매출 대비 주가가 매우 저평가
+                    - 1~3: 일반적인 적정 수준
+                    - 3 이상: 고평가 영역
+                    
+                    #### 💰 배당수익률
+                    - 5% 이상: 고배당 주식
+                    - 2~5%: 적정 배당
+                    - 2% 미만: 저배당
+                    
+                    #### 🏦 부채비율
+                    - 100% 미만: 재무구조 우수
+                    - 100~200%: 보통 수준
+                    - 200% 이상: 재무구조 위험
+                    
+                    #### 💵 유동비율
+                    - 200% 이상: 매우 안정적인 단기 지급능력
+                    - 100~200%: 적정한 단기 지급능력
+                    - 100% 미만: 단기 지급능력 주의 필요
+                    """)
 
             # Footer
             st.sidebar.markdown("---")
@@ -1064,7 +1080,7 @@ def main():
             st.error(f"차트 생성 중 오류 발생: {str(e)}")
             return
     else:
-        st.info("데이터를 불러오기 위해 심볼을 입력하고 'Fetch Data' 버튼을 클릭하세요.")
+        st.info("👆 왼쪽 사이드바에서 종목 심볼을 입력하고 'Fetch Data' 버튼을 클릭하세요.")
         return
 
 if __name__ == "__main__":
